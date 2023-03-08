@@ -1,0 +1,353 @@
+---
+title: "R Notebook"
+output:
+  pdf_document: default
+  html_notebook: default
+  html_document:
+    df_print: paged
+---
+
+## International Soccer
+
+### Data Source
+
+The aim of this project is to analyze a dataset on international soccer from Kaggle. The dataset is from: https://www.kaggle.com/datasets/martj42/international-football-results-from-1872-to-2017
+
+### Getting started
+
+```{r}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+rm(list=ls())
+```
+
+Let's import the libraries and read in the data.
+```{r}
+library(plotly)
+library(tidyverse)
+library(ggplot2)
+
+goal_data <- read_csv('goalscorers.csv',
+                      col_types = cols(
+                        date  = col_date("%Y-%m-%d"),
+                        home_team = col_character(),
+                        away_team = col_character(),
+                        team = col_character(),
+                        scorer = col_character(),
+                        own_goal = col_logical(),
+                        penalty = col_logical()))
+
+results <- read_csv('results.csv')
+
+```
+
+### Exploring the data
+Let's filter the data into the last 20 years (games in 2002 and later).
+```{r}
+library(lubridate)
+
+recent_goals <- goal_data %>%
+  #filter(date >= '2002-01-01')
+  filter(year(date) >= 2002)
+
+```
+
+Let's check the starting timeframe of our data.
+```{r}
+min(recent_goals$date)
+
+```
+
+#### Research Question 1
+Question: *Which teams had the most goals?*
+
+Ideally, we would normalize the number of goals by the number of games played. In this case, we are just calculating the total number of goals scored.
+```{r}
+
+q1 = recent_goals %>%
+  group_by(team) %>%
+  summarise(num_goals = n(),
+            own_goals = sum(ifelse(own_goal, 1, 0)),
+            scores = num_goals - own_goals,
+            .groups="drop") %>%
+   slice_max(scores, n=20) %>% # this chooses the top 20 rows according to the scores field
+  mutate(`Country Status` = ifelse(team=="Germany", "Top", "Other")) %>%
+ggplot(aes(y=reorder(team, scores), x=scores)) +
+  geom_col(aes(fill=`Country Status`)) + # highlights Germany
+  theme_classic() +
+  labs(y="", x="",
+       title="Top 20 Goal Scoring Teams 2002-2023 (Total Scores)") +
+  scale_fill_manual(name="",
+                    breaks=c("Top", "Other"),
+                    values=c("darkred", "grey50"))+
+  geom_text(aes(x=scores-20, 
+                label=scores),
+            color="white") +
+  theme(legend.position = "none",
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.line.x = element_blank())
+
+ggplotly(q1)
+
+```
+
+#### Research Question 2
+Question *Which individuals are the best at scoring? Which players scored the most own goals?* 
+```{r}
+
+library(ggplot2)
+q2 = recent_goals %>%
+  group_by(scorer) %>%
+  summarise(num_goals = n(),
+            own_goals = sum(ifelse(own_goal, 1, 0)),
+            scores = num_goals - own_goals,
+            .groups="drop") %>%
+   slice_max(scores, n=20) %>% # this chooses the top 20 rows according to the scores field
+  mutate(`Top Player` = ifelse(scorer=="Cristiano Ronaldo", "Top", "Other")) %>%
+ggplot(aes(y=reorder(scorer, scores), x=scores)) +
+  geom_col(aes(fill=`Top Player`)) + # highlights Ronaldo
+  theme_classic() +
+  labs(y="", x="",
+       title="Top 20 Goal Scorers 2002-2023 (Total Scores)") +
+  scale_fill_manual(name="",
+                    breaks=c("Top", "Other"),
+                    values=c("darkred", "grey50"))+
+  geom_text(aes(x=scores-20, 
+                label=scores),
+            color="white") +
+  theme(legend.position = "none",
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.line.x = element_blank())
+
+ggplotly(q2)
+
+```
+
+
+#### Research Question 3
+Question: *What is the relationship between own goals + penalties?*
+
+This chart shows the relationship/correlation between own goals and penalties. 
+```{r}
+library(plotly)
+
+p3 <- recent_goals %>%
+  group_by(team) %>%
+  summarise(num_goals = n(),
+            `Own Goals` = sum(ifelse(own_goal, 1, 0)),
+            Penalties = sum(ifelse(penalty, 1, 0)),
+            scores = num_goals - `Own Goals`) %>%
+  ggplot(aes(x=Penalties, y=`Own Goals`,
+             text=paste("scores: ", scores," out of ",num_goals, sep="" ))) +
+  geom_point(color="royalblue", alpha=0.5, aes(size=num_goals)) + theme_classic() +
+  labs(size="Number of Scores", y="Own Goals", x="Penalties") +
+  theme(legend.position = "bottom")
+
+ggplotly(p3)
+
+```
+
+*Lets think about what is driving this relationship?*
+
+In the above chart, we can see a positive linear relationship between own goals and penalties. This means that as the frequency of own goals increases, so does the frequency of goals scored via penalties.
+
+One possible explanation for this relationship could be that teams that are more likely to make mistakes leading to own goals may also be more likely to commit fouls resulting in penalties. Alternatively, it could be that teams who are more likely to be awarded penalties may also be more likely to have own goals scored against them due to defensive mistakes or bad luck.
+
+
+#### Research Question 4
+Question: *Has the number of own goals changed over the years*
+
+```{r}
+g2 <- recent_goals %>%
+  mutate(`Goal Year` = year(date)) %>%
+  group_by(`Goal Year`) %>%
+  summarise(`Own Goals` = sum(ifelse(own_goal, 1, 0))) %>%
+  ggplot(aes(x=`Goal Year`, y=`Own Goals`)) +
+  geom_area(fill="royalblue", stat="identity") +
+  theme_classic()
+
+ggplotly(g2)
+```
+
+We can clearly see that the number of own goals saw a sharp spike in 2019 and 2021.
+
+#### Research Question 5
+Question: *When are the most goals scored during the game?*
+
+**Area chart**
+```{r}
+recent_goals %>%
+  group_by(minute) %>%
+  summarise(num_goals = n(),
+            own_goals = sum(ifelse(own_goal, 1, 0)),
+            scores = num_goals - own_goals) %>%
+  ggplot(aes(x=minute, y=scores)) +
+  geom_area(fill="royalblue", alpha=0.5) + theme_classic() +
+  geom_vline(xintercept = 45, linetype=3) + 
+  geom_vline(xintercept = 90, linetype=3) + 
+  annotate("text", x=73, y=50, label="End of Regulation") +
+  annotate("text", x=35, y=50, label="Half-time")
+
+```
+
+Question: *When are the most goals scored by United States, Canada, Brazil, Argentina and France during the game?*
+**Multiple line/area chart**
+```{r}
+recent_goals %>%
+  filter(team %in% c("United States", "Canada",
+                     "Brazil", "Argentina", "France")) %>%
+  group_by(minute, team) %>%
+  summarise(num_goals = n(),
+            own_goals = sum(ifelse(own_goal, 1, 0)),
+            scores = num_goals - own_goals) %>%
+  ggplot(aes(x=minute, y=scores, group=team)) +
+  geom_line(aes(color=team), alpha=0.5) + theme_classic() +
+  geom_vline(xintercept = 90) + 
+  scale_color_brewer(palette="Blues") +
+  annotate("text", x=60, y=30, label="End of Regulation")
+
+```
+
+**Multiple area chart**
+Use the stat="identity" to make a non-stacked area chart.
+```{r}
+# FACET
+recent_goals %>%
+  group_by(team, minute) %>%
+  summarise(num_goals = n(),
+            own_goals = sum(ifelse(own_goal, 1, 0)),
+            scores = num_goals - own_goals) %>%
+  filter(team %in% c("United States", "France", "Brazil", "Argentina", "Canada")) %>%
+  ggplot(aes(x=minute, y=scores)) +
+  geom_area(aes(fill=team), position="identity",alpha=0.5) +
+  scale_fill_brewer(palette = "Set1") +
+  geom_vline(xintercept = 90, linetype=3) +
+  geom_vline(xintercept = 45, linetype=3) +
+  #annotate("text", x=77, y=30, label="End of Regulation") +
+  #annotate("text", x=35, y=30, label="Half time") +
+  theme_classic() + theme(legend.position = "bottom") +
+  labs(x="Minute", title="By Minute Goals for Several Countries")
+
+```
+**Multiple line chart for selected teams**
+```{r}
+# FACET
+recent_goals %>%
+  group_by(team, minute) %>%
+  summarise(num_goals = n(),
+            own_goals = sum(ifelse(own_goal, 1, 0)),
+            scores = num_goals - own_goals) %>%
+  filter(team %in% c("United States", "France", "Brazil", "Argentina", "Canada")) %>%
+  ggplot(aes(x=minute, y=scores)) +
+  geom_line(aes(color=team)) +
+  geom_vline(xintercept = 90, linetype=3) +
+  geom_vline(xintercept = 45, linetype=3) +
+  #annotate("text", x=77, y=30, label="End of Regulation") +
+  #annotate("text", x=35, y=30, label="Half time") +
+  theme_classic() + theme(legend.position = "bottom") +
+  labs(x="Minute", title="By Minute Goals for Several Countries")
+
+```
+
+Lets visualise this using facet_wrap, which creates a separate chart for each team.
+**Multiple line chart with a facet_wrap for selected teams**
+```{r}
+# FACET
+recent_goals %>%
+  group_by(team, minute) %>%
+  summarise(num_goals = n(),
+            own_goals = sum(ifelse(own_goal, 1, 0)),
+            scores = num_goals - own_goals) %>%
+  filter(team %in% c("United States", "France", "Brazil", "Argentina", "Belgium")) %>%
+  ggplot(aes(x=minute, y=scores)) +
+  geom_line(aes(color=team)) +
+  facet_wrap(~team) +
+  geom_vline(xintercept = 90, linetype=3) +
+  geom_vline(xintercept = 45, linetype=3) +
+  #annotate("text", x=77, y=30, label="End of Regulation") +
+  #annotate("text", x=35, y=30, label="Half time") +
+  theme_classic() + theme(legend.position = "bottom") +
+  labs(x="Minute", title="By Minute Goals for Several Countries")
+
+```
+
+#### Research Question 5
+Question: *Compare minute-by-minute goals scored by United States, Belgium, Brazil, Argentina and France during the game.*
+Choosing a categorical transition variable: https://gganimate.com/reference/transition_states.html
+```{r}
+library(gganimate)
+g2 = recent_goals %>%
+  group_by(team, minute) %>%
+  summarise(num_goals = n(),
+            own_goals = sum(ifelse(own_goal, 1, 0)),
+            scores = num_goals - own_goals) %>%
+  filter(team %in% c("United States", "France", "Brazil", "Argentina", "Belgium")) %>%
+  ggplot(aes(x=minute, y=scores)) +
+  geom_area(aes(fill=team)) +
+  geom_vline(xintercept = 90, linetype=3) +
+  geom_vline(xintercept = 45, linetype=3) +
+  theme_classic() + theme(legend.position = "bottom") +
+  labs(x="Minute", 
+  title="By Minute Goals for Several Countries: {closest_state}") +
+  transition_states(team) 
+
+animate(g2, renderer = gifski_renderer())
+```
+
+*If we want to manually choose the transition: https://gganimate.com/reference/transition_manual.html*
+```{r}
+
+library(tidyverse)
+library(gganimate)
+p3 <- recent_goals %>%
+  mutate(minute = as.factor(minute)) %>%
+  group_by(team, minute) %>%
+  summarise(num_goals = n(),
+            own_goals = sum(ifelse(own_goal, 1, 0)),
+            scores = num_goals - own_goals) %>%
+  filter(team %in% c("United States", "France", "Brazil", "Argentina", "Belgium")) %>%
+  ggplot(aes(x=minute, y=scores)) +
+  geom_col(aes(fill=team)) +
+  #facet_wrap(~minute) +
+  geom_vline(xintercept = 90, linetype=3) +
+  geom_vline(xintercept = 45, linetype=3) +
+  #annotate("text", x=77, y=30, label="End of Regulation") +
+  #annotate("text", x=35, y=30, label="Half time") +
+  theme_classic() + theme(legend.position = "bottom") +
+  scale_x_discrete(breaks=as.character(seq(0,125,5))) +
+  scale_y_continuous(expand=c(0,0)) +
+  labs(x="Minute", title="By Minute Goals for Several Countries: {current_frame }") +
+  transition_manual(minute , cumulative=TRUE)
+
+animate(p3, renderer = gifski_renderer())
+```
+
+#### Research Question 6
+Question: *Visualise, for each year individually, the minute-by-minute goals scored by all countries during the game.*
+Choosing a date: https://gganimate.com/reference/transition_time.html
+```{r}
+library(gganimate)
+library(lubridate)
+#install.packages('transformr')
+p4<- recent_goals %>%
+  mutate(game_year = year(date)) %>%
+  group_by(game_year, minute) %>%
+  summarise(num_goals = n(),
+            own_goals = sum(ifelse(own_goal, 1, 0)),
+            scores = num_goals - own_goals) %>%
+  ggplot(aes(x=minute, y=scores)) +
+  geom_col()+ 
+  geom_vline(xintercept = 90, linetype=3) +
+  geom_vline(xintercept = 45, linetype=3) +
+  #annotate("text", x=77, y=30, label="End of Regulation") +
+  #annotate("text", x=35, y=30, label="Half time") +
+  theme_classic() + 
+  theme(legend.position = "bottom") +
+  labs(x="Minute", title="By Minute Goals for Several Countries: {round(stat(frame_time), digits=0)}") +
+  transition_time(game_year) + 
+  ease_aes('linear')
+
+animate(p4, renderer = gifski_renderer())
+```
+
